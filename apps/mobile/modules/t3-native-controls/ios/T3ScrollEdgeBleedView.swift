@@ -23,7 +23,7 @@ final class T3ScrollEdgeBleedView: ExpoView {
   /// The bar's side is read from the root view controller, whose traits can settle after this
   /// view's own during a fold; with no size change after that, nothing else would recheck.
   private weak var observedWindow: UIWindow?
-  private var windowTraitRegistration: (any UITraitChangeRegistration)?
+  private var unregisterWindowTraits: (() -> Void)?
 
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
@@ -53,17 +53,18 @@ final class T3ScrollEdgeBleedView: ExpoView {
 
   private func observeWindowTraits() {
     guard observedWindow !== window else { return }
-    if let observedWindow, let windowTraitRegistration {
-      observedWindow.unregisterForTraitChanges(windowTraitRegistration)
-    }
+    unregisterWindowTraits?()
+    unregisterWindowTraits = nil
     observedWindow = window
-    windowTraitRegistration = nil
     #if canImport(UIKit, _version: 9127.0.85)
     if #available(iOS 27.1, *), let window {
-      windowTraitRegistration = window.registerForTraitChanges(
+      let registration = window.registerForTraitChanges(
         UITraitCollection.systemTraitsAffectingVerticalBarEdge
       ) { [weak self] (_: UIWindow, _: UITraitCollection) in
         self?.setNeedsLayout()
+      }
+      unregisterWindowTraits = { [weak window] in
+        window?.unregisterForTraitChanges(registration)
       }
     }
     #endif

@@ -11,8 +11,10 @@ final class T3LayoutMetricsView: ExpoView {
   required init(appContext: AppContext? = nil) {
     super.init(appContext: appContext)
     isUserInteractionEnabled = false
-    registerForTraitChanges([UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]) { (view: T3LayoutMetricsView, _: UITraitCollection) in
-      view.publishMetrics()
+    if #available(iOS 17.0, *) {
+      registerForTraitChanges([UITraitHorizontalSizeClass.self, UITraitVerticalSizeClass.self]) { (view: T3LayoutMetricsView, _: UITraitCollection) in
+        view.publishMetrics()
+      }
     }
     // The hinge and vertical-bar APIs ship in the iOS 27.1 SDK, whose UIKit is 9127.0.85.
     // Xcode 27.0 has Swift 6.4 but the 27.0 SDK (UIKit 9127.0.84), so gate on the SDK.
@@ -60,6 +62,16 @@ final class T3LayoutMetricsView: ExpoView {
   override func safeAreaInsetsDidChange() {
     super.safeAreaInsetsDidChange()
     publishMetrics()
+  }
+
+  override func traitCollectionDidChange(_ previousTraitCollection: UITraitCollection?) {
+    super.traitCollectionDidChange(previousTraitCollection)
+    if #unavailable(iOS 17.0) {
+      if previousTraitCollection?.horizontalSizeClass != traitCollection.horizontalSizeClass ||
+         previousTraitCollection?.verticalSizeClass != traitCollection.verticalSizeClass {
+        publishMetrics()
+      }
+    }
   }
 
   private func publishMetrics() {

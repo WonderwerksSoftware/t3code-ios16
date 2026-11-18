@@ -12,6 +12,7 @@ process.env.EXPO_NO_TYPESCRIPT_SETUP = "1";
 
 const APP_VARIANT = resolveAppVariant(repoEnv.APP_VARIANT);
 const isIosPersonalTeamBuild = repoEnv.T3CODE_IOS_PERSONAL_TEAM === "1";
+const isIosCompatibilityBuild = repoEnv.T3CODE_IOS_COMPATIBILITY === "1";
 const runtimeVersionPolicy =
   process.env.MOBILE_VERSION_POLICY ??
   (APP_VARIANT === "development" ? "appVersion" : "fingerprint");
@@ -130,6 +131,11 @@ const dmSansFonts = {
   bold: "@expo-google-fonts/dm-sans/700Bold/DMSans_700Bold.ttf",
 } as const;
 
+const clerkPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
+  "@clerk/expo",
+  { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild },
+];
+
 const widgetsPlugin: NonNullable<ExpoConfig["plugins"]>[number] = [
   "expo-widgets",
   {
@@ -236,7 +242,7 @@ const config: ExpoConfig = {
   name: variant.appName,
   slug: "t3-code",
   platforms: ["ios", "android"],
-  scheme: variant.scheme,
+  scheme: isIosCompatibilityBuild ? [variant.scheme, iosBundleIdentifier] : variant.scheme,
   version: repoEnv.T3CODE_MOBILE_VERSION ?? "2.3.0",
   runtimeVersion: {
     // Skip costly fingerprinting on dev launches; preview and production OTAs require matching native projects.
@@ -246,7 +252,8 @@ const config: ExpoConfig = {
   icon: variant.assets.appIcon,
   userInterfaceStyle: "automatic",
   updates: {
-    enabled: repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
+    // Compatibility binaries must keep the JS bundle tested with their patched native modules.
+    enabled: !isIosCompatibilityBuild && repoEnv.T3CODE_MOBILE_UPDATES_ENABLED !== "0",
     url: "https://u.expo.dev/d763fcb8-d37c-41ea-a773-b54a0ab4a454",
     checkAutomatically: "ON_LOAD",
     fallbackToCacheTimeout: 0,
@@ -325,6 +332,8 @@ const config: ExpoConfig = {
     favicon: variant.assets.appIcon,
   },
   plugins: [
+    // Entitlement mods run in reverse order; remove unsupported capabilities last.
+    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
     "expo-asset",
     [
       "expo-font",
@@ -363,8 +372,8 @@ const config: ExpoConfig = {
         mode: APP_VARIANT === "development" ? "development" : "production",
       },
     ],
-    // Gate Clerk here: withoutIosPersonalTeamCapabilities runs too early to strip its entitlement.
-    ["@clerk/expo", { theme: "./clerk-theme.json", appleSignIn: !isIosPersonalTeamBuild }],
+    // Personal Team builds use the supported sign-in methods without native Apple sign-in.
+    ...(!isIosCompatibilityBuild ? [clerkPlugin] : ["./plugins/withIosCompatibility.cjs"]),
     "expo-web-browser",
     [
       "expo-quick-actions",
@@ -437,7 +446,7 @@ const config: ExpoConfig = {
           ].join("\n"),
         },
         ios: {
-          deploymentTarget: "18.0",
+          deploymentTarget: isIosCompatibilityBuild ? "16.4" : "18.0",
           // AppCheckCore 11.3+ includes Swift and needs module maps for these Objective-C dependencies.
           extraPods: [
             { name: "GoogleUtilities", modular_headers: true },
@@ -460,7 +469,6 @@ const config: ExpoConfig = {
     // MainActivity mods run in reverse order; extend the tablet-orientation override.
     "./plugins/withAndroidWindowDisplayMetrics.cjs",
     "./plugins/withAndroidTabletOrientation.cjs",
-    ...(isIosPersonalTeamBuild ? ["./plugins/withoutIosPersonalTeamCapabilities.cjs"] : []),
   ],
   extra: {
     appVariant: APP_VARIANT,
@@ -468,6 +476,7 @@ const config: ExpoConfig = {
       process.env.T3CODE_FEATURE_SECRETS?.trim().toLowerCase() ?? "",
     ),
     iosPersonalTeamBuild: isIosPersonalTeamBuild,
+    iosCompatibility: isIosCompatibilityBuild,
     relay: {
       url: repoEnv.T3CODE_RELAY_URL ?? null,
     },

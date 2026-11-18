@@ -5,9 +5,11 @@ import {
   UserProfileView,
 } from "@clerk/expo/native-components";
 import { useNavigation } from "@react-navigation/native";
+import Constants from "expo-constants";
 import { useEffect, useState } from "react";
-import { View } from "react-native";
+import { Platform, View } from "react-native";
 
+import { HostedAuthView } from "../cloud/HostedAuthView";
 import { hasCloudPublicConfig } from "../cloud/publicConfig";
 import { T3ConnectProfilePage } from "../cloud/T3ConnectProfilePage";
 
@@ -46,7 +48,9 @@ function ConfiguredSettingsAuthRouteScreen() {
   return (
     <View collapsable={false} className="flex-1 overflow-hidden bg-sheet">
       {isLoaded ? (
-        hasBeenSignedIn ? (
+        Platform.OS === "ios" && Constants.expoConfig?.extra?.iosCompatibility === true ? (
+          <HostedAuthView signedIn={hasBeenSignedIn} onHostBack={handleHostBack} />
+        ) : hasBeenSignedIn ? (
           <UserProfileView
             customPages={USER_PROFILE_CUSTOM_PAGES}
             isDismissible={false}

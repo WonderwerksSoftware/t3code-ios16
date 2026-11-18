@@ -1,0 +1,103 @@
+name: Native iOS16 unsigned IPA
+
+on:
+  workflow_dispatch:
+    inputs:
+      bundle_identifier:
+        description: Native identity with a registered Clerk hosted-auth callback
+        required: true
+        default: com.t3tools.t3code
+        type: string
+      free_artifact_budget_mib:
+        description: Verified unused free artifact storage; zero disables uploads
+        required: true
+        default: 0
+        type: number
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios16-unsigned-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  device-release:
+    # Fail closed for private repositories: do not draw from billed private minutes.
+    if: ${{ github.event.repository.private == false }}
+    runs-on: xcode-27
+    timeout-minutes: 120
+    env:
+      T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: ${{ inputs.bundle_identifier }}
+      T3CODE_UNSIGNED_OUTPUT: ${{ runner.temp }}/t3-ios16-unsigned
+      VP_DOWNLOAD_TIMEOUT: "120"
+    steps:
+      # This source is public; anonymous Git needs no checkout credential or secret.
+      # Skip read-only vendored reference trees to save disk on the standard runner.
+      - name: Fetch this exact public source revision
+        shell: bash
+        env:
+          SOURCE_REPOSITORY: ${{ github.repository }}
+          SOURCE_SHA: ${{ github.sha }}
+          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          [[ "$SOURCE_REPOSITORY" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]
+          [[ "$SOURCE_SHA" =~ ^[0-9a-f]{40}$ ]]
+          git init source
+          git -C source remote add origin "https://github.com/$SOURCE_REPOSITORY.git"
+          git -C source sparse-checkout init --no-cone
+          printf '/*\n!/.repos/\n' > source/.git/info/sparse-checkout
+          git -C source -c credential.helper= -c http.extraHeader= fetch --filter=blob:none --no-tags origin "$SOURCE_SHA"
+          git -C source checkout --detach FETCH_HEAD
+          test "$(git -C source rev-parse HEAD)" = "$SOURCE_SHA"
+
+      - name: Select the upstream Xcode version
+        shell: bash
+        run: |
+          test -d /Applications/Xcode_27.1.app/Contents/Developer
+          echo DEVELOPER_DIR=/Applications/Xcode_27.1.app/Contents/Developer >> "$GITHUB_ENV"
+
+      - name: Install the pinned Vite+ and Node toolchain
+        uses: voidzero-dev/setup-vp@250f29ce396baf5e8f24498e17c0dfdebabc26eb # v1.15.0, matches pinned upstream CI
+        with:
+          working-directory: source
+          version: "1.4.0"
+          node-version-file: package.json
+          cache: false
+          run-install: false
+
+      - name: Compile and package the unsigned native Release app
+        shell: bash
+        working-directory: source
+        run: bash scripts/build-ios16-unsigned.sh
+
+      - name: Check the verified free artifact storage budget
+        id: artifact-budget
+        if: ${{ always() && inputs.free_artifact_budget_mib > 0 }}
+        shell: bash
+        env:
+          FREE_ARTIFACT_BUDGET_MIB: ${{ inputs.free_artifact_budget_mib }}
+        run: |
+          python3 - <<'PY'
+          import os
+          from pathlib import Path
+          budget = int(os.environ["FREE_ARTIFACT_BUDGET_MIB"])
+          assert 0 < budget <= 1024, "Use a verified free allowance of at most 1 GiB"
+          output = Path(os.environ["T3CODE_UNSIGNED_OUTPUT"])
+          assert output.is_dir(), "No build evidence directory exists"
+          size = sum(p.stat().st_size for p in output.rglob("*") if p.is_file())
+          assert size <= budget * 1024 * 1024 * 0.9, "Artifact exceeds free budget, including overhead reserve"
+          with open(os.environ["GITHUB_OUTPUT"], "a") as file:
+              file.write("allowed=true\n")
+          print(f"Artifact payload: {size} bytes; within verified free budget of {budget} MiB")
+          PY
+
+      - name: Upload the unsigned IPA and build evidence
+        if: ${{ always() && steps.artifact-budget.outputs.allowed == 'true' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: T3Code-iOS16-unsigned-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/t3-ios16-unsigned
+          if-no-files-found: warn
+          retention-days: 1
+          compression-level: 0
