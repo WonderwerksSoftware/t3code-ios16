@@ -29,7 +29,6 @@ jobs:
     timeout-minutes: 120
     env:
       T3CODE_IOS_PERSONAL_TEAM_BUNDLE_ID: ${{ inputs.bundle_identifier }}
-      T3CODE_UNSIGNED_OUTPUT: ${{ runner.temp }}/t3-ios16-unsigned
       VP_DOWNLOAD_TIMEOUT: "120"
     steps:
       # This source is public; anonymous Git needs no checkout credential or secret.
@@ -69,6 +68,8 @@ jobs:
       - name: Compile and package the unsigned native Release app
         shell: bash
         working-directory: source
+        env:
+          T3CODE_UNSIGNED_OUTPUT: ${{ runner.temp }}/t3-ios16-unsigned
         run: bash scripts/build-ios16-unsigned.sh
 
       - name: Check the verified free artifact storage budget
@@ -77,6 +78,7 @@ jobs:
         shell: bash
         env:
           FREE_ARTIFACT_BUDGET_MIB: ${{ inputs.free_artifact_budget_mib }}
+          T3CODE_UNSIGNED_OUTPUT: ${{ runner.temp }}/t3-ios16-unsigned
         run: |
           python3 - <<'PY'
           import os
